@@ -2,7 +2,7 @@
 
 记住 Windows 桌面图标的位置，随时一键恢复。带**真实缩略预览**（真实壁纸 + 真实图标 + 任务栏），点开就能看到桌面以前的样子。
 
-> 当前版本 **v0.0.2**：修复「要连点几次才恢复完全」和「重启后布局被打乱」
+> 当前版本 **v0.0.3**：新增 `repair` 命令，根治「每次重启固定错乱同一批图标」（系统布局缓存损坏）
 
 ![DeskPos 主界面](docs/main.png)
 
@@ -10,9 +10,9 @@
 
 | 文件 | 大小 | 说明 |
 |---|---|---|
-| **[DeskPos-v0.0.2-win-x64.zip](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.2/DeskPos-v0.0.2-win-x64.zip)** | 53.5 MB | **推荐**。解压双击即用，已内含 .NET 运行时，换台电脑也不用装任何东西 |
-| [DeskPos.exe](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.2/DeskPos.exe) | 300 KB | 已装 .NET 10 Desktop Runtime 的话，下这个更小 |
-| [deskpos.py](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.2/deskpos.py) | 17 KB | 纯标准库命令行版，适合任务计划 |
+| **[DeskPos-v0.0.3-win-x64.zip](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.3/DeskPos-v0.0.3-win-x64.zip)** | 53.7 MB | **推荐**。解压双击即用，已内含 .NET 运行时，换台电脑也不用装任何东西 |
+| [DeskPos.exe](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.3/DeskPos.exe) | 300 KB | 已装 .NET 10 Desktop Runtime 的话，下这个更小 |
+| [deskpos.py](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.3/deskpos.py) | 17 KB | 纯标准库命令行版，适合任务计划 |
 
 zip 里是一个完整文件夹：`DeskPos.exe` + `deskpos.py` / `deskpos.bat` + 中文说明 `README.txt` + `LICENSE`。绿色免安装，不写注册表，不常驻后台。
 
@@ -44,7 +44,7 @@ zip 里是一个完整文件夹：`DeskPos.exe` + `deskpos.py` / `deskpos.bat` +
 
 ### GUI 用法
 
-下 Release 里的 `DeskPos-v0.0.2-win-x64.zip`，解压，双击 `DeskPos.exe`。选布局 → 右侧立刻预览 → 「恢复选中布局」（或双击列表项）。
+下 Release 里的 `DeskPos-v0.0.3-win-x64.zip`，解压，双击 `DeskPos.exe`。选布局 → 右侧立刻预览 → 「恢复选中布局」（或双击列表项）。
 
 ### CLI 用法
 
@@ -106,8 +106,8 @@ python tools/make_icon.py
   - 必须用 `LVM_SETITEMPOSITION32` 配远程 `POINT`；老式的 `LVM_SETITEMPOSITION` 会把坐标压进 16 位，副屏在主屏左侧时负坐标直接错位
 - 必须先 `SetProcessDpiAwarenessContext(-4)`，否则 125% 缩放下读到的是逻辑像素，恢复后会整体偏移
 - **恢复位置首选 shell 自己的 `IFolderView::SelectAndPositionItems`**（经 `IShellWindows → IServiceProvider → IShellBrowser → IShellView` 拿到桌面视图）
-  - 位置由 shell 设置，它会立即写进注册表 `Bags\Desktop\IconLayouts`，**重启后依然保持**；
-    直接改 explorer 内存不会碰这个值，重启就被旧值覆盖——这是 v0.0.1「重启后布局全乱」的根因
+  - 位置由 shell 设置，它会立即写进注册表 `Bags\Desktop\IconLayouts`（注意：写进去不等于重启后能还原，见下方「已知限制」）；
+    直接改 explorer 内存不会碰这个值，重启就被旧值覆盖——这是 v0.0.1「重启后布局全乱」的直接原因
   - shell 的网格吸附是异步的，写完必须读回核对，不一致就再补一轮（最多 4 轮），
     这样一次点击就能收敛，不用反复点
 - 关「自动排列」只清 `LVS_AUTOARRANGE` 样式位，**绝对不要跟着发 `LVM_ARRANGE`** ——
@@ -123,6 +123,30 @@ python tools/make_icon.py
 - 命令行版的恢复只改内存，explorer 重启后可能被系统缓存覆盖；要用 GUI 版恢复一次才会持久化
 - 布局是在别的分辨率/缩放下保存的，坐标可能不是当前网格点，会被吸附导致少量图标摆不到位
 - 预览背景只是静态壁纸；如果用的是 Lively Wallpaper 这类动态壁纸，取到的是它当前的截图帧
+- **重启后布局被重排，通常是 `IconLayouts` 内部状态损坏**（实测确认）
+  - 现象：每次重启固定错位同一批图标（本机为 42 个），手动拖动、用工具恢复都无效，
+    而且 Windows 会把错位后的结果写回注册表当成正确状态
+  - 修复：删掉 `HKCU\Software\Microsoft\Windows\Shell\Bags\1\Desktop` 下的 `IconLayouts` 值，
+    重启让系统重建一份（桌面会先变成默认排列），再恢复布局并保存；此后即可正常持久化
+  - 本机实测（1920×1080 / 125% 缩放，布局最右列 `x=1822`，距屏幕右边缘仅 3px）：
+    | 状态 | 操作 | 重启后 |
+    |---|---|---|
+    | 数据损坏 | 直接重启 | 固定 42 个错位 |
+    | 清理后 | 打乱 15 个 → 点恢复 | **0 不一致** |
+    | 清理后 | 打乱 20 个 → 点恢复 | **0 不一致** |
+  - 已排除的干扰项：贴屏幕边缘、布局稀疏度、125% 缩放、重建图标缓存、重置 `Bags`/`BagMRU`
+  - ⚠️ 排查时最大的坑：用脚本直接改写 `IconLayouts`（改坐标区、交换两组坐标、增删条目）
+    极易把内部状态弄脏，之后**每一次重启都会按错误方式重排**，看起来像"系统固有的 bug"。
+    一旦怀疑数据脏了，先按上面的方法删值重建，再判断问题是否复现
+  - 附：Win11 的 `IconLayouts` 二进制格式（供排查参考）
+    - 位置 `HKCU\Software\Microsoft\Windows\Shell\Bags\1\Desktop\IconLayouts`
+    - 条目区自 offset 40 起：`[utf16 名称][00 00][u32][u32]`，条目顺序与桌面枚举顺序不同
+    - 坐标区 = 末尾 `图标数 × 10` 字节，每组 `[float32 列][float32 行][uint16 序号]`
+    - 格点换算：`列 = (x - 17) / 95`，`行 = (y - 2) / 122`（本机 125% 缩放下）
+- 可选兜底：若在某些环境下重启后仍被重排，可用 `dist\DeskPosBootRestore.exe` +
+  计划任务 `DeskPosLayoutRestore`（登录后 15 秒跑一次，0.3 秒摆完即退出）。
+  本机当前**不需要**，任务已禁用
+
 
 ## License
 

@@ -35,3 +35,10 @@ desktop.ini
 
 # 本机验证工具（shell 接口实验）
 tools/ShellPos/
+
+# 诊断录制产生的会话数据（含桌面图标名，不入库）
+diag/
+
+# Python 缓存
+__pycache__/
+*.pyc

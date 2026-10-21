@@ -15,13 +15,14 @@ deskpos.py -- 记住 / 恢复 Windows 桌面图标位置
   python deskpos.py show  [名称]        查看布局内容
   python deskpos.py diff  [名称]        预览：恢复后哪些图标会动（不改动桌面）
   python deskpos.py delete 名称         删除布局
+  python deskpos.py repair              修复「重启后固定错乱同一批图标」：清掉损坏的系统布局缓存
 
 注意事项:
   * 桌面右键 -> 查看 -> 必须关闭「自动排列图标」，否则恢复会被立刻重排
     （脚本检测到会自动帮你关掉，并给出提示）
   * 图标按显示名称匹配，重命名文件后该图标的位置会失配
-  * Windows 10 1809+ 之后 explorer 自己也记一份位置，
-    内存改写的位置在 explorer 重启后可能丢失，重新 restore 一次即可
+  * 如果每次重启都固定错乱同一批图标（拖回去也没用），说明系统里的
+    布局缓存 IconLayouts 损坏了：先跑一次 repair，重启后再 restore 即可根治
 """
 
 import ctypes
@@ -30,6 +31,7 @@ import json
 import os
 import sys
 import time
+import winreg
 
 # ---------------------------------------------------------------- Win32 常量
 LVM_FIRST = 0x1000
@@ -450,8 +452,8 @@ def cmd_restore(name=None, dry_run=False):
                   + ", ".join(missing[:8]) + ("..." if len(missing) > 8 else ""))
         if extra:
             print(f"  新增 {len(extra)} 个图标未在布局中，保持原位")
-        print("  提示: 命令行版只改内存，explorer 重启后可能被系统缓存覆盖；"
-              "要让布局长期保持，用 GUI 版恢复一次")
+        if failed:
+            print("  提示: 出现较多图标没摆到位时，先跑一次 repair 清理系统布局缓存")
         return 0
     finally:
         ex.close()
@@ -495,6 +497,43 @@ def cmd_status():
         ex.close()
 
 
+def cmd_repair():
+    """清掉系统里损坏的桌面布局缓存（IconLayouts），让它下次启动时重建。
+
+    适用症状：每次重启后桌面固定错乱同一批图标，手动拖动、restore 都无效。
+    原因通常是这个二进制值内部状态坏了，Windows 会按错误方式还原并写回。
+    """
+    bag = r"Software\Microsoft\Windows\Shell\Bags\1\Desktop"
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, bag) as k:
+            blob = winreg.QueryValueEx(k, "IconLayouts")[0]
+    except OSError:
+        print("系统里没有 IconLayouts 缓存，已经是干净状态，不需要修复")
+        return 0
+
+    bak = os.path.join(os.path.dirname(store_dir()), "IconLayouts.bak")
+    os.makedirs(os.path.dirname(bak), exist_ok=True)
+    with open(bak, "wb") as f:
+        f.write(blob)
+    print(f"已备份原缓存 -> {bak}（{len(blob)} 字节）")
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, bag, 0, winreg.KEY_SET_VALUE) as k:
+            winreg.DeleteValue(k, "IconLayouts")
+    except OSError as e:
+        print(f"删除失败: {e}")
+        print("  可能是权限问题，试试用管理员身份运行")
+        return 1
+
+    print("已删除 IconLayouts（系统下次启动会重建一份干净的）")
+    print()
+    print("接着做两步：")
+    print("  1. 重启电脑 —— 桌面会先变成默认排列，这是正常的")
+    print("  2. 重启后执行：python deskpos.py restore")
+    print("  之后再重启就能正常保持了")
+    return 0
+
+
 def main(argv):
     enable_dpi_awareness()
     if len(argv) < 2:
@@ -524,6 +563,8 @@ def main(argv):
             return cmd_delete(name)
         elif cmd == "status":
             return cmd_status()
+        elif cmd == "repair":
+            return cmd_repair()
         else:
             print(__doc__)
             return 1
