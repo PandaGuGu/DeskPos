@@ -6,6 +6,16 @@
 
 ![DeskPos 主界面](docs/main.png)
 
+## 下载
+
+| 文件 | 大小 | 说明 |
+|---|---|---|
+| **[DeskPos-v0.0.1-win-x64.zip](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.1/DeskPos-v0.0.1-win-x64.zip)** | 53.5 MB | **推荐**。解压双击即用，已内含 .NET 运行时，换台电脑也不用装任何东西 |
+| [DeskPos.exe](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.1/DeskPos.exe) | 300 KB | 已装 .NET 10 Desktop Runtime 的话，下这个更小 |
+| [deskpos.py](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.1/deskpos.py) | 17 KB | 纯标准库命令行版，适合任务计划 |
+
+zip 里是一个完整文件夹：`DeskPos.exe` + `deskpos.py` / `deskpos.bat` + 中文说明 `README.txt` + `LICENSE`。绿色免安装，不写注册表，不常驻后台。
+
 ## 它解决什么问题
 
 换分辨率、改缩放、插拔副屏、装完显卡驱动、explorer 崩溃重启……桌面图标就全乱了。DeskPos 把每个图标的名字和坐标存成一份 JSON，需要的时候精确还原，坐标是**像素级**的，不是重新排队。
@@ -25,8 +35,8 @@
 
 | | GUI（C# / WPF） | CLI（Python） |
 |---|---|---|
-| 体积 | 单文件 exe ≈ 300 KB | 单文件脚本 ≈ 17 KB |
-| 依赖 | .NET 10 Desktop Runtime | 纯标准库，零依赖 |
+| 体积 | 单文件 exe ≈ 300 KB<br>（自包含版 59 MB） | 单文件脚本 ≈ 17 KB |
+| 依赖 | .NET 10 Desktop Runtime<br>（自包含版不需要） | 纯标准库，零依赖 |
 | 常驻内存 | 关闭即释放 | 不运行时完全不占 |
 | 适合 | 日常点点点 | 任务计划、批处理、开机自动恢复 |
 
@@ -34,7 +44,7 @@
 
 ### GUI 用法
 
-下载 [Releases](https://github.com/PandaGuGu/DeskPos/releases) 里的 `DeskPos.exe`，双击运行。选布局 → 右侧立刻预览 → 「恢复选中布局」（或双击列表项）。
+下 Release 里的 `DeskPos-v0.0.1-win-x64.zip`，解压，双击 `DeskPos.exe`。选布局 → 右侧立刻预览 → 「恢复选中布局」（或双击列表项）。
 
 ### CLI 用法
 
@@ -72,11 +82,17 @@ python deskpos.py restore 工作 --dry-run   # 演练，不写入
 
 ```bash
 cd src/DeskPosUI
+
+# 框架依赖版：约 300 KB，需要目标机器装 .NET 10 Desktop Runtime
 dotnet publish -c Release -r win-x64 --self-contained false \
   -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ../../dist
-```
 
-想要换台电脑也能直接跑（体积约 90 MB）：把 `--self-contained false` 换成 `--self-contained true`。
+# 自包含版：约 59 MB，换台电脑直接能跑（Release 里的 zip 就是它）
+dotnet publish -c Release -r win-x64 --self-contained true \
+  -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true \
+  -p:IncludeNativeLibrariesForSelfExtract=true -p:SatelliteResourceLanguages=zh-Hans \
+  -o ../../dist-portable
+```
 
 生成图标（纯标准库，4× 超采样 + 圆角矩形 SDF + 蓝紫渐变）：
 

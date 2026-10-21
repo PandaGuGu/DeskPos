@@ -6,6 +6,15 @@ obj/
 
 # 构建输出
 dist/
+dist-portable/
+
+# 本地打包中间产物
+pack/
+unziptest/
+*.zip
+.rid
+.url
+rel.json
 
 # 本机调试辅助工具（截图 / 点击 / 图标测试），不随仓库发布
 tools/Shot/
