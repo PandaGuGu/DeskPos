@@ -1,0 +1,49 @@
+[package]
+name = "deskpos"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "DeskPos · 记住 / 恢复 Windows 桌面图标位置（Rust 版）"
+license = "MIT"
+
+[lib]
+name = "deskpos"
+path = "src/lib.rs"
+
+[[bin]]
+name = "deskpos"
+path = "src/bin/deskpos.rs"
+
+[[bin]]
+name = "deskpos-gui"
+path = "src/bin/deskpos_gui.rs"
+required-features = ["gui"]
+
+[features]
+default = ["gui"]
+gui = ["dep:eframe", "dep:image"]
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+eframe = { version = "0.32", optional = true, default-features = false, features = [
+    "glow",
+    "default_fonts",
+] }
+image = { version = "0.25", optional = true, default-features = false, features = [
+    "png",
+    "jpeg",
+    "bmp",
+    "gif",
+    "webp",
+] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

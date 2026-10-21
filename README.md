@@ -31,16 +31,16 @@ zip 里是一个完整文件夹：`DeskPos.exe` + `deskpos.py` / `deskpos.bat` +
 
 ![预览细节](docs/preview-hover.png)
 
-## 两种形态，共用一套布局文件
+## 三种形态，共用一套布局文件
 
-| | GUI（C# / WPF） | CLI（Python） |
-|---|---|---|
-| 体积 | 单文件 exe ≈ 300 KB<br>（自包含版 59 MB） | 单文件脚本 ≈ 17 KB |
-| 依赖 | .NET 10 Desktop Runtime<br>（自包含版不需要） | 纯标准库，零依赖 |
-| 常驻内存 | 关闭即释放 | 不运行时完全不占 |
-| 适合 | 日常点点点 | 任务计划、批处理、开机自动恢复 |
+| | GUI（C# / WPF） | CLI（Python） | Rust 版（GUI + CLI） |
+|---|---|---|---|
+| 体积 | 单文件 exe ≈ 300 KB<br>（自包含版 59 MB） | 单文件脚本 ≈ 17 KB | GUI ≈ 3.4 MB<br>CLI ≈ 285 KB |
+| 依赖 | .NET 10 Desktop Runtime<br>（自包含版不需要） | 纯标准库，零依赖 | 无运行时依赖 |
+| 常驻内存 | 关闭即释放 | 不运行时完全不占 | 关闭即释放 |
+| 适合 | 日常点点点 | 任务计划、批处理、开机自动恢复 | 免装运行时、还想要预览界面 |
 
-两者读写同一份布局：`%APPDATA%\DesktopIconPos\layouts\*.json`，CLI 存的布局 GUI 里能直接预览，反过来也一样。
+三者读写同一份布局：`%APPDATA%\DesktopIconPos\layouts\*.json`，CLI 存的布局 GUI 里能直接预览，反过来也一样。
 
 ### GUI 用法
 
@@ -60,6 +60,29 @@ python deskpos.py restore 工作 --dry-run   # 演练，不写入
 ```
 
 开机自动恢复（无需常驻进程）：任务计划程序 → 登录时 → `python deskpos.py restore 工作`。
+
+### Rust 版（GUI + CLI）
+
+Rust 版把两边的活都干了：一个 GUI 复刻 WPF 界面（布局列表 + 真实缩略预览 + 悬停看名字 + 叠加当前位置），一个 CLI 复刻 `deskpos.py` 的全部命令。两个 exe 加起来不到 4 MB，**既不用装 .NET，也不用装 Python**。
+
+```bash
+cd rust
+cargo build --release --features gui     # 或者双击 build.bat，产物收进 rust/dist
+```
+
+```bash
+dist\deskpos-gui.exe              # 图形界面
+dist\deskpos.exe status           # 命令行，命令与 deskpos.py 完全一致
+dist\deskpos.exe restore 工作
+dist\deskpos.exe probe            # 诊断：shell 官方接口（IFolderView）通不通
+```
+
+Rust 版的几个实现取舍：
+
+- 恢复同样首选 `IFolderView::SelectAndPositionItems`，COM 链路（`IShellWindows → IServiceProvider → IShellBrowser → IFolderView`）用 `#[repr(C)]` vtable 手写，没有引入 windows-rs，编译快、产物小
+- 图标取系统「超大图标」列表（48px）→ HICON → RGBA，缩略图里比 32px 清楚；没有 alpha 通道的老图标用 mask 位图补
+- 中文字体运行时从 `C:\Windows\Fonts` 借一份（等线 / 黑体 / 微软雅黑），不打包字体
+- 窗口尺寸按工作区除 DPI 缩放算，125% / 150% 下不会跑出屏幕
 
 ## 布局文件格式
 
@@ -98,6 +121,15 @@ dotnet publish -c Release -r win-x64 --self-contained true \
 
 ```bash
 python tools/make_icon.py
+```
+
+Rust 版（两个 exe 都出来，产物收进 `rust/dist`）：
+
+```bash
+cd rust
+cargo build --release --features gui
+# 或者
+build.bat
 ```
 
 ## 实现要点

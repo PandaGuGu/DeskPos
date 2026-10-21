@@ -1,0 +1,5 @@
+/target
+Cargo.lock.bak
+
+# 保住源码目录：根 .gitignore 里的 bin/ 曾经把 src/bin/ 整个吃掉
+!/src/bin/

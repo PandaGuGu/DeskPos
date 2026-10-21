@@ -1,6 +1,6 @@
-# .NET 构建产物
-bin/
-obj/
+# .NET 构建产物（只针对 WPF 工程；不能用裸 bin/，否则会误伤 rust/src/bin/）
+src/DeskPosUI/bin/
+src/DeskPosUI/obj/
 *.user
 .vs/
 
