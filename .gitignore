@@ -29,3 +29,6 @@ desktop.ini
 
 # 本地工作数据
 .workbuddy/
+
+# 本地验证截图
+/*.png
