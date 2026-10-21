@@ -2,7 +2,7 @@
 
 记住 Windows 桌面图标的位置，随时一键恢复。带**真实缩略预览**（真实壁纸 + 真实图标 + 任务栏），点开就能看到桌面以前的样子。
 
-> 当前版本 **v0.0.1**（初版）
+> 当前版本 **v0.0.2**：修复「要连点几次才恢复完全」和「重启后布局被打乱」
 
 ![DeskPos 主界面](docs/main.png)
 
@@ -10,9 +10,9 @@
 
 | 文件 | 大小 | 说明 |
 |---|---|---|
-| **[DeskPos-v0.0.1-win-x64.zip](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.1/DeskPos-v0.0.1-win-x64.zip)** | 53.5 MB | **推荐**。解压双击即用，已内含 .NET 运行时，换台电脑也不用装任何东西 |
-| [DeskPos.exe](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.1/DeskPos.exe) | 300 KB | 已装 .NET 10 Desktop Runtime 的话，下这个更小 |
-| [deskpos.py](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.1/deskpos.py) | 17 KB | 纯标准库命令行版，适合任务计划 |
+| **[DeskPos-v0.0.2-win-x64.zip](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.2/DeskPos-v0.0.2-win-x64.zip)** | 53.5 MB | **推荐**。解压双击即用，已内含 .NET 运行时，换台电脑也不用装任何东西 |
+| [DeskPos.exe](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.2/DeskPos.exe) | 300 KB | 已装 .NET 10 Desktop Runtime 的话，下这个更小 |
+| [deskpos.py](https://github.com/PandaGuGu/DeskPos/releases/download/v0.0.2/deskpos.py) | 17 KB | 纯标准库命令行版，适合任务计划 |
 
 zip 里是一个完整文件夹：`DeskPos.exe` + `deskpos.py` / `deskpos.bat` + 中文说明 `README.txt` + `LICENSE`。绿色免安装，不写注册表，不常驻后台。
 
@@ -44,7 +44,7 @@ zip 里是一个完整文件夹：`DeskPos.exe` + `deskpos.py` / `deskpos.bat` +
 
 ### GUI 用法
 
-下 Release 里的 `DeskPos-v0.0.1-win-x64.zip`，解压，双击 `DeskPos.exe`。选布局 → 右侧立刻预览 → 「恢复选中布局」（或双击列表项）。
+下 Release 里的 `DeskPos-v0.0.2-win-x64.zip`，解压，双击 `DeskPos.exe`。选布局 → 右侧立刻预览 → 「恢复选中布局」（或双击列表项）。
 
 ### CLI 用法
 
@@ -105,7 +105,13 @@ python tools/make_icon.py
 - 读写位置靠 `LVM_GETITEMPOSITION` / `LVM_SETITEMPOSITION32` 加 `ReadProcessMemory` / `WriteProcessMemory`
   - 必须用 `LVM_SETITEMPOSITION32` 配远程 `POINT`；老式的 `LVM_SETITEMPOSITION` 会把坐标压进 16 位，副屏在主屏左侧时负坐标直接错位
 - 必须先 `SetProcessDpiAwarenessContext(-4)`，否则 125% 缩放下读到的是逻辑像素，恢复后会整体偏移
-- 恢复前清掉 `LVS_AUTOARRANGE` 样式，否则 `LVM_ARRANGE` 会立刻把图标重新排队
+- **恢复位置首选 shell 自己的 `IFolderView::SelectAndPositionItems`**（经 `IShellWindows → IServiceProvider → IShellBrowser → IShellView` 拿到桌面视图）
+  - 位置由 shell 设置，它会立即写进注册表 `Bags\Desktop\IconLayouts`，**重启后依然保持**；
+    直接改 explorer 内存不会碰这个值，重启就被旧值覆盖——这是 v0.0.1「重启后布局全乱」的根因
+  - shell 的网格吸附是异步的，写完必须读回核对，不一致就再补一轮（最多 4 轮），
+    这样一次点击就能收敛，不用反复点
+- 关「自动排列」只清 `LVS_AUTOARRANGE` 样式位，**绝对不要跟着发 `LVM_ARRANGE`** ——
+  它会把图标立刻重排一遍，冲掉刚写好的位置（v0.0.1「要点好几次」的原因之一）
 - 预览里的图标：`SHGetFileInfo` 取 32px 图标；「此电脑」「回收站」「网络」「控制面板」这类虚拟项要先 `SHParseDisplayName` 拿 PIDL，再配 `SHGFI_PIDL` 取图标
 - 布局里存的是**显示名**，快捷方式真实文件名带 `.lnk`，所以还维护了一份「短名 → 完整路径」索引（含 `C:\Users\Public\Desktop`），否则一半图标取不到
 - 壁纸用 `SystemParametersInfo(SPI_GETDESKWALLPAPER)` 读取当前壁纸路径
@@ -114,7 +120,8 @@ python tools/make_icon.py
 
 - 图标按**文件名**匹配：改名或删掉的文件不会被恢复，新加的图标保持原位
 - 要跨进程读写 explorer 内存，**杀软报毒是常态**，加白名单即可
-- Win10 1809 之后 shell 自己也缓存了一份位置，通过内存改写的位置在 explorer 重启后可能需要再恢复一次
+- 命令行版的恢复只改内存，explorer 重启后可能被系统缓存覆盖；要用 GUI 版恢复一次才会持久化
+- 布局是在别的分辨率/缩放下保存的，坐标可能不是当前网格点，会被吸附导致少量图标摆不到位
 - 预览背景只是静态壁纸；如果用的是 Lively Wallpaper 这类动态壁纸，取到的是它当前的截图帧
 
 ## License

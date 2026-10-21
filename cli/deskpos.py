@@ -193,10 +193,9 @@ class Explorer(object):
     def disable_auto_arrange(self):
         style = user32.GetWindowLongW(self.lv, GWL_STYLE)
         if style & LVS_AUTOARRANGE:
-            # SetWindowLongW 只改本地副本的样式位，需配合 LVM_ARRANGE 生效；
-            # 更可靠的做法是走桌面右键菜单，所以这里把 style 位清掉后再刷新
+            # 只清样式位。绝对不要跟着发 LVM_ARRANGE——那会立刻把图标全部
+            # 重排一遍，把刚写好的位置冲掉（旧版「要点好几次」的原因之一）
             user32.SetWindowLongW(self.lv, GWL_STYLE, style & ~LVS_AUTOARRANGE)
-            send_msg(self.lv, LVM_ARRANGE, LVA_DEFAULT, 0)
             return True
         return False
 
@@ -407,14 +406,52 @@ def cmd_restore(name=None, dry_run=False):
             print(f"合计 {len(to_move)} 个，未找到 {len(missing)} 个")
             return 0
 
-        for idx, nm, x, y in to_move:
-            ex.set_pos(idx, x, y)
-        print(f"已恢复 {len(to_move)} 个图标到布局 [{name}]")
+        # 多轮补写：explorer 的网格吸附是异步的，写一次不一定全部到位，
+        # 每轮重建「名字 -> 序号」映射（图标顺序可能变），只补写还有偏差的
+        want = {it["name"]: (it["x"], it["y"]) for it in data["icons"] if it.get("name")}
+        moved = len(to_move)
+        rounds = 0
+        for _ in range(4):
+            idx_map = {ex.item_name(i): i for i in range(ex.count())}
+            wrote = 0
+            for nm, (x, y) in want.items():
+                i = idx_map.get(nm)
+                if i is None:
+                    continue
+                if ex.item_pos(i) == (x, y):
+                    continue
+                ex.set_pos(i, x, y)
+                wrote += 1
+            if not wrote:
+                break
+            rounds += 1
+            time.sleep(0.14)
+
+        # 核对
+        idx_map = {ex.item_name(i): i for i in range(ex.count())}
+        ok, failed = 0, []
+        for nm, (x, y) in want.items():
+            i = idx_map.get(nm)
+            if i is None:
+                continue
+            if ex.item_pos(i) == (x, y):
+                ok += 1
+            else:
+                failed.append(nm)
+
+        print(f"已恢复 {ok} 个图标到布局 [{name}]（移动 {moved} 个，"
+              f"{max(rounds, 1)} 轮写入）")
+        if failed:
+            print(f"  {len(failed)} 个没摆到位: " + ", ".join(failed[:6])
+                  + ("..." if len(failed) > 6 else ""))
+            print("  如果数量较多，检查是否开着「自动排列图标」或「将图标与网格对齐」")
         if missing:
             print(f"  未找到 {len(missing)} 个（可能已删除或改名）: "
                   + ", ".join(missing[:8]) + ("..." if len(missing) > 8 else ""))
         if extra:
             print(f"  新增 {len(extra)} 个图标未在布局中，保持原位")
+        print("  提示: 命令行版只改内存，explorer 重启后可能被系统缓存覆盖；"
+              "要让布局长期保持，用 GUI 版恢复一次")
         return 0
     finally:
         ex.close()

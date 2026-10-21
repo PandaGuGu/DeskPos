@@ -48,6 +48,27 @@ namespace DeskPos
         }
     }
 
+    /// <summary>一次恢复的结果</summary>
+    public class RestoreResult
+    {
+        /// <summary>最终与布局一致（按名字能对上）的图标数</summary>
+        public int Restored;
+        /// <summary>本次真正移动过的图标数</summary>
+        public int Moved;
+        /// <summary>重试轮数</summary>
+        public int Rounds;
+        /// <summary>是否用上了 shell 官方接口（能持久化）</summary>
+        public bool UsedShellApi;
+        /// <summary>恢复前是否帮你关掉了自动排列</summary>
+        public bool AutoArrangeDisabled;
+        /// <summary>布局里有、桌面上找不到的</summary>
+        public List<string> Missing = new List<string>();
+        /// <summary>桌面上有、布局里没有的（保持原位）</summary>
+        public List<string> Extra = new List<string>();
+        /// <summary>多轮重试后仍然摆不到位的</summary>
+        public List<string> Failed = new List<string>();
+    }
+
     // ---------------------------------------------------------------- Win32
     internal static class Native
     {
@@ -226,8 +247,9 @@ namespace DeskPos
         {
             int style = Native.GetWindowLong(_lv, Native.GWL_STYLE);
             if ((style & Native.LVS_AUTOARRANGE) == 0) return false;
+            // 只清样式位，不要发 LVM_ARRANGE——那会立刻把所有图标重排一遍，
+            // 反而把刚写好的位置冲掉（这也是以前「要点好几次」的原因之一）
             Native.SetWindowLong(_lv, Native.GWL_STYLE, style & ~Native.LVS_AUTOARRANGE);
-            Send(Native.LVM_ARRANGE, (IntPtr)Native.LVA_DEFAULT, IntPtr.Zero);
             return true;
         }
 
@@ -303,33 +325,98 @@ namespace DeskPos
             return (move, missing, extra, saved.Count);
         }
 
-        public (int restored, List<string> missing, List<string> extra) Restore(LayoutFile data, bool skipIfSame = true)
+        /// <summary>
+        /// 恢复布局。
+        /// 优先走 shell 的 IFolderView::SelectAndPositionItems——位置由 shell 自己设置，
+        /// 它会同步更新 Bags\Desktop\IconLayouts，重启后依然保持；
+        /// shell 接口不可用时退回内存写入，并做多轮校验。
+        /// </summary>
+        public RestoreResult Restore(LayoutFile data)
         {
-            if (AutoArrange) DisableAutoArrange();
+            bool autoOff = AutoArrange && DisableAutoArrange();
 
-            var saved = new Dictionary<string, IconPos>();
-            foreach (var it in data.Icons) saved[it.Name] = it;
+            var saved = new Dictionary<string, IconPos>(StringComparer.OrdinalIgnoreCase);
+            foreach (var it in data.Icons)
+                if (!string.IsNullOrEmpty(it.Name)) saved[it.Name] = it;
 
-            var current = new Dictionary<string, int>();
+            var result = new RestoreResult { AutoArrangeDisabled = autoOff };
+
+            // 以当前桌面的图标名为基准算 missing / extra
+            var current = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int n = Count;
-            for (int i = 0; i < n; i++) current[ItemName(i)] = i;
+            for (int i = 0; i < n; i++) current.Add(ItemName(i));
+            foreach (var k in saved.Keys) if (!current.Contains(k)) result.Missing.Add(k);
+            foreach (var k in current) if (!saved.ContainsKey(k)) result.Extra.Add(k);
 
-            int done = 0;
-            var missing = new List<string>();
-            var extra = new List<string>();
-            foreach (var kv in saved)
+            // ---------- 首选：shell 官方接口 ----------
+            try
             {
-                if (!current.TryGetValue(kv.Key, out int idx)) { missing.Add(kv.Key); continue; }
-                if (skipIfSame)
+                using (ShellView sv = ShellView.TryOpen())
                 {
-                    var (cx, cy) = ItemPos(idx);
-                    if (cx == kv.Value.X && cy == kv.Value.Y) { done++; continue; }
+                    if (sv != null)
+                    {
+                        var (moved, failed, rounds) = sv.Apply(saved);
+                        result.UsedShellApi = true;
+                        result.Moved = moved;
+                        result.Rounds = rounds;
+                        result.Failed = failed;
+                        result.Restored = saved.Count - result.Missing.Count - failed.Count;
+                        return result;
+                    }
                 }
-                SetPos(idx, kv.Value.X, kv.Value.Y);
-                done++;
             }
-            foreach (var k in current.Keys) if (!saved.ContainsKey(k)) extra.Add(k);
-            return (done, missing, extra);
+            catch
+            {
+                // 忽略，落到内存方式
+            }
+
+            // ---------- 退路：内存写入 + 多轮校验 ----------
+            var (restored, memMoved, memFailed) = RestoreByMemory(saved);
+            result.Restored = restored;
+            result.Moved = memMoved;
+            result.Failed = memFailed;
+            return result;
+        }
+
+        /// <summary>
+        /// 老办法：LVM_SETITEMPOSITION32 直接改 explorer 内存。
+        /// explorer 的网格吸附是异步的，写一次不一定全生效，所以每轮重读、
+        /// 只补写还有偏差的图标，最多 4 轮。
+        /// </summary>
+        private (int restored, int moved, List<string> failed) RestoreByMemory(Dictionary<string, IconPos> saved)
+        {
+            int moved = 0;
+            for (int round = 0; round < 4; round++)
+            {
+                int n = Count;
+                int wrote = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    string name = ItemName(i);
+                    if (!saved.TryGetValue(name, out IconPos want)) continue;
+                    var (cx, cy) = ItemPos(i);
+                    if (cx == want.X && cy == want.Y) continue;
+                    SetPos(i, want.X, want.Y);
+                    wrote++;
+                    if (round == 0) moved++;
+                }
+                if (wrote == 0) break;
+                System.Threading.Thread.Sleep(140);
+            }
+
+            // 核对
+            var failed = new List<string>();
+            int ok = 0;
+            int total = Count;
+            for (int i = 0; i < total; i++)
+            {
+                string name = ItemName(i);
+                if (!saved.TryGetValue(name, out IconPos want)) continue;
+                var (cx, cy) = ItemPos(i);
+                if (cx == want.X && cy == want.Y) ok++;
+                else failed.Add(name);
+            }
+            return (ok, moved, failed);
         }
 
         private static byte[] StructToBytes<T>(T value) where T : struct

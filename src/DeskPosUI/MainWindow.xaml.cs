@@ -243,13 +243,32 @@ namespace DeskPos
             {
                 using (var d = new Desktop())
                 {
-                    var (n, missing, extra) = d.Restore(entry.Data);
-                    string msg = $"已恢复 {n} 个图标到「{entry.DisplayName}」";
-                    if (missing.Count > 0) msg += $" · {missing.Count} 个未找到";
-                    ShowToast(msg, missing.Count > 0 ? "info" : "ok");
-                    StatusText.Text = extra.Count > 0
-                        ? $"还有 {extra.Count} 个图标不在该布局中，已保持原位"
-                        : "已按布局还原桌面";
+                    RestoreResult r = d.Restore(entry.Data);
+
+                    string msg;
+                    if (r.Restored > 0 && r.Failed.Count == 0)
+                        msg = $"已恢复 {r.Restored} 个图标";
+                    else if (r.Failed.Count > 0)
+                        msg = $"恢复了 {r.Restored} 个，{r.Failed.Count} 个没摆到位";
+                    else
+                        msg = $"已按「{entry.DisplayName}」对齐";
+
+                    if (r.Missing.Count > 0) msg += $" · {r.Missing.Count} 个未找到";
+                    ShowToast(msg, r.Failed.Count > 0 ? "err" : r.Missing.Count > 0 ? "info" : "ok");
+
+                    var parts = new List<string>();
+                    parts.Add($"布局 {entry.Count} 个图标");
+                    parts.Add($"移动 {r.Moved} 个");
+                    if (r.AutoArrangeDisabled) parts.Add("已关闭自动排列");
+                    if (r.Extra.Count > 0) parts.Add($"新增 {r.Extra.Count} 个留在原位");
+                    if (r.Missing.Count > 0) parts.Add($"已消失 {r.Missing.Count} 个");
+                    parts.Add(r.UsedShellApi ? "位置已写入系统，重启后保持" : "已改内存，重启可能被系统覆盖");
+                    StatusText.Text = string.Join(" · ", parts);
+
+                    if (!r.UsedShellApi)
+                        ShowToast("系统接口不可用，位置只在本次生效", "info");
+                    else if (r.Failed.Count > 3)
+                        ShowToast("多个图标摆不到位，请右键桌面关闭「自动排列图标」和「将图标与网格对齐」后重试", "info");
                 }
                 if (_showGhost) LoadGhost();
             }
