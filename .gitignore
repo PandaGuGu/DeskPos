@@ -1,0 +1,22 @@
+# .NET 构建产物
+bin/
+obj/
+*.user
+.vs/
+
+# 构建输出
+dist/
+
+# 本机调试辅助工具（截图 / 点击 / 图标测试），不随仓库发布
+tools/Shot/
+tools/Click/
+tools/IconTest/
+
+# 系统与编辑器
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+
+# 本地工作数据
+.workbuddy/
